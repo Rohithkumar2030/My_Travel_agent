@@ -1,4 +1,5 @@
 from google import genai
+from json import json
 from json_repair import repair_json
 import lancedb
 from dotenv import load_dotenv
@@ -13,20 +14,26 @@ class TravelPlanner():
     def __init__(self, api_key, client):
         self.api_key = api_key
         self.client = client
+        self.vectors = vectors
+        self.destinations = None
 
-    def llm_chat(self,model: str = "gemini-3-flash-preview", context=None):
-        prompt = f"""You are an assistant that generates city recommendations based on a person's travel preferences, style, and lifestyle.
-        
-        Context: {context}
+    def LLM_Chat(self,model: str = "gemini-3-flash-preview", context=None):
+        json_schema = {
+            "type": "OBJECT",
+            "properties": {
+                "cities": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Exactly one destination city 3-letter IATA code."},
+                "city_names": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "The full common name of the destination city."},
+                "city_description": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "A description of why this city fits the user."},
+                "recommended_duration_days": {"type": "ARRAY", "items": {"type": "INTEGER"}, "description": "Suggested number of days to spend there."},
+                "origin": {"type": "STRING", "description": "The 3-letter IATA code of the user's starting airport."},
+                "currency": {"type": "STRING", "description": "The local currency code used where the user lives."}
+            },
+            "required": ["cities", "city_names", "city_description", "recommended_duration_days", "origin", "currency"]
+        }
+
+        instructions = f"""You are an assistant that generates city recommendations based on a person's travel preferences, style, and lifestyle.
+    
         Your Task is to generate a list of cities suitable for this person based on the above context. Organize the recommendations into the following JSON structure:
-        {{
-            "cities": [ /* list a city suitable with countries for this user in IATA code*/ ],
-            "city_names":[ /* name of the city],
-            "city_description": [ /* Corresponding city description]
-            "recommended_duration_days": [ /* suggested number of days to spend in each city */ ],
-            "origin": [ /* where the person starts journey from in IATA code or the nearest famous airport code to the origin],
-            "currency":[ /* The local currency which the user lives in and uses]
-        }}
         
         Requirements:
         - Output valid JSON only; do not include extra commentary.
@@ -42,25 +49,54 @@ class TravelPlanner():
         - Output **only** the data in this structure. Do not include explanations, commentary, or any mention of JSON or code blocks.
         """
 
+        llm_config = {
+            "system_instruction": instructions,
+            "response_mime_type": "application/json",
+            "response_schema": json_schema
+        }
+
         try:
-            response = client.models.generate_content(
+            response = self.client.models.generate_content(
                 model="gemini-3-flash-preview",
-                contents = prompt
+                contents = [context],
+                config=llm_config
             )
-
-            if response.text:
-                return response.text.strip()
-            else:
-                data = repair_json(response.text.strip(),return_objects=True)
-                return data
-
-        except Exception as e:
-            print(f"Error:{str(e)}")
+        except Exception as api_error:
+            print(f"Gemini API Call failed: {str(api_error)}")
             return None
 
-    def fetch_destination(self):
-        query_embeds=create_embeddings("Describe the user's travel preferences, including favorite destinations, travel style (adventurous, relaxed, cultural, etc.), budget range, accommodation and transport choices, preferred activities, and travel companions. Include typical trip length, planning style, favorite climates or seasons, and how they express themselves through travel (e.g., photography, local immersion, sustainability). Mention any travel-related hobbies, booking habits, or loyalty programs.")
+        if response and response.text:
+            try:
+                return json.loads(response.text.strip())
+            except Exception as e:
+                print(f"Error:{str(e)}")
+                try:
+                    return repair_json(response.text.strip(),return_objects=True)
+                except Exception:
+                    return None   
+        return None
+
+    def fetch_destination(self, user_prompt):
+        query = (f"Take this user_prompt: {user_prompt} and Describe the user's travel preferences, "
+        f"including favorite destinations, travel style (adventurous, relaxed, cultural, etc.), "
+        f"budget range, accommodation and transport choices, preferred activities, and travel companions. "
+        f"Include typical trip length, planning style, favorite climates or seasons, and how they express "
+        f"themselves through travel (e.g., photography, local immersion, sustainability). "
+        f"Mention any travel-related hobbies, booking habits, or loyalty programs.")
+
+        query_embeds=create_embeddings(query)
         if query_embeds:
             try:
                 results = vectors.search(query=query_embeds).to_list()[:5]
-                
+                context = " ".join([(r["text"]) for r in results])
+                json_output = self.llm_chat(context=context)
+                self.destinations = json.loads(json_output)["city_names"][0]
+                return self.destinations
+            except Exception as error:
+                print(f"Failed to Fetch destination due to the following error {str(error)}")
+                return None
+
+    def fetch_weather(self,city,start_date,number_of_days):
+        base_url = f"https://serpapi.com/search.json?q=whats+the+weather+condition+in+the+{paris}+from+{22-05-2026}+to+{24-05-2026}&location={}&hl=en&gl=us&google_domain=google.com"
+        params = {api_key=Weather_API}
+        response = requests.get(base_url,params=params)
