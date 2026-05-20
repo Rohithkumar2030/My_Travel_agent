@@ -1,6 +1,7 @@
 from google import genai
 from json import json
 from json_repair import repair_json
+import datetime
 import lancedb
 from dotenv import load_dotenv
 
@@ -16,6 +17,8 @@ class TravelPlanner():
         self.client = client
         self.vectors = vectors
         self.destinations = None
+        self.start_date = None
+        self.end_date = None
 
     def LLM_Chat(self,model: str = "gemini-3-flash-preview", context=None):
         json_schema = {
@@ -24,11 +27,12 @@ class TravelPlanner():
                 "cities": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Exactly one destination city 3-letter IATA code."},
                 "city_names": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "The full common name of the destination city."},
                 "city_description": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "A description of why this city fits the user."},
-                "recommended_duration_days": {"type": "ARRAY", "items": {"type": "INTEGER"}, "description": "Suggested number of days to spend there."},
+                "start_date": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "The Starting date of the trip.Usually the next day of search if no input is mentioned"},
+                "end_date": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "The Ending date of the trip."},
                 "origin": {"type": "STRING", "description": "The 3-letter IATA code of the user's starting airport."},
                 "currency": {"type": "STRING", "description": "The local currency code used where the user lives."}
             },
-            "required": ["cities", "city_names", "city_description", "recommended_duration_days", "origin", "currency"]
+            "required": ["cities", "city_names", "city_description", "start_date", "end_date", "origin", "currency"]
         }
 
         instructions = f"""You are an assistant that generates city recommendations based on a person's travel preferences, style, and lifestyle.
@@ -76,14 +80,8 @@ class TravelPlanner():
                     return None   
         return None
 
-    def fetch_destination(self, user_prompt):
-        query = (f"Take this user_prompt: {user_prompt} and Describe the user's travel preferences, "
-        f"including favorite destinations, travel style (adventurous, relaxed, cultural, etc.), "
-        f"budget range, accommodation and transport choices, preferred activities, and travel companions. "
-        f"Include typical trip length, planning style, favorite climates or seasons, and how they express "
-        f"themselves through travel (e.g., photography, local immersion, sustainability). "
-        f"Mention any travel-related hobbies, booking habits, or loyalty programs.")
-
+    def fetch_destination(self, user_input):
+        query = (f"Take this user_prompt: {user_input} and Describe the user's travel preferences, including favorite destinations, travel style (adventurous, relaxed, cultural, etc.), budget range, accommodation and transport choices, preferred activities, and travel companions. Include typical trip length, planning style, favorite climates or seasons, and how they express themselves through travel (e.g., photography, local immersion, sustainability). Mention any travel-related hobbies, booking habits, or loyalty programs.")
         query_embeds=create_embeddings(query)
         if query_embeds:
             try:
@@ -96,7 +94,24 @@ class TravelPlanner():
                 print(f"Failed to Fetch destination due to the following error {str(error)}")
                 return None
 
+    def fetch_dates(self,user_prompt)
+        query = (f"Take this user_prompt: {user_input} and Extract the precise timeline, calendar dates, and duration for the trip described in the user_input. Identify the explicit start date and the number of days of the trip to calculate or locate the exact end date based on the total trip length/number of days per destination, or returning dates mentioned. Focus on temporal keywords like days, weeks, months, specific dates associated with this travel plan.")
+        query_embeds=create_embeddings(query)
+        if query_embeds:
+            try:
+                results = vectors.search(query=query_embeds).to_list()[:5]
+                context = " ".join([(r["text"]) for r in results])
+                json_output = self.llm_chat(context=context)
+                self.start_date = json.loads(json_output)["start_date"][0]
+                self.end_date = json.loads(json_output)["end_date"][0]
+                
+
+
+
+
     def fetch_weather(self,city,start_date,number_of_days):
         base_url = f"https://serpapi.com/search.json?q=whats+the+weather+condition+in+the+{paris}+from+{22-05-2026}+to+{24-05-2026}&location={}&hl=en&gl=us&google_domain=google.com"
         params = {api_key=Weather_API}
         response = requests.get(base_url,params=params)
+
+        print(response["forecast"][])
