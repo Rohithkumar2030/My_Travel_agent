@@ -1,7 +1,7 @@
 from google import genai
 from json import json
 from json_repair import repair_json
-import datetime
+from datetime import datetime
 import lancedb
 from dotenv import load_dotenv
 
@@ -90,8 +90,8 @@ class TravelPlanner():
                 json_output = self.llm_chat(context=context)
                 self.destinations = json.loads(json_output)["city_names"][0]
                 return self.destinations
-            except Exception as error:
-                print(f"Failed to Fetch destination due to the following error {str(error)}")
+            except Exception as e:
+                print(f"Failed to Fetch destination due to the following error {str(e)}")
                 return None
 
     def fetch_dates(self,user_prompt)
@@ -104,14 +104,15 @@ class TravelPlanner():
                 json_output = self.llm_chat(context=context)
                 self.start_date = json.loads(json_output)["start_date"][0]
                 self.end_date = json.loads(json_output)["end_date"][0]
-                
+                return [self.start_date,self.end_date]
+            except Exception as e:
+                print(f"Failed to Fetch date due to the following error {str(e)}")
+                return None
 
-
-
-
-    def fetch_weather(self,city,start_date,number_of_days):
-        base_url = f"https://serpapi.com/search.json?q=whats+the+weather+condition+in+the+{paris}+from+{22-05-2026}+to+{24-05-2026}&location={}&hl=en&gl=us&google_domain=google.com"
+    def fetch_weather(self,city,start_date,end_date):
+        base_url = f"https://serpapi.com/search.json?q=whats+the+weather+condition+in+the+{city}+from+{start_date}+to+{end_date}&location=United+States&hl=en&gl=us&google_domain=google.com"
         params = {api_key=Weather_API}
         response = requests.get(base_url,params=params)
-
+        if response.status_code == 200:
+            data = response.json()["answer_box"]["forecast"]
         print(response["forecast"][])
