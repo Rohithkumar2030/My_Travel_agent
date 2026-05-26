@@ -1,3 +1,5 @@
 json-repair
 dotenv
-google
+google-genai
+datetime
+lancedb
