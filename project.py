@@ -29,7 +29,7 @@ class TravelPlanner():
         self.start_date = None
         self.end_date = None
 
-    def LLM_Chat(self,model: str = "gemini-3-flash-preview", context=None):
+    def LLM_Chat(self,model: str = "gemini-2.5-flash-lite", context=None):
         json_schema = {
             "type": "OBJECT",
             "properties": {
@@ -70,7 +70,7 @@ class TravelPlanner():
 
         try:
             response = self.client.models.generate_content(
-                model="gemini-3-flash-preview",
+                model="gemini-2.5-flash-lite",
                 contents = [context],
                 config=llm_config
             )
@@ -103,7 +103,7 @@ class TravelPlanner():
                     f"Historical Context:\n{context}\n\n"
                     f"Current Request:\n{user_prompt}"
                 )
-                json_output = self.LLM_Chat(context=context)
+                json_output = self.LLM_Chat(context=full_context)
                 self.destinations = json_output["city_names"][0]
                 return self.destinations
             except Exception as e:
@@ -111,13 +111,20 @@ class TravelPlanner():
                 return None
 
     def fetch_dates(self,user_prompt):
+
         query = (f"Take this user_prompt: {user_prompt} and Extract the precise timeline, calendar dates, and duration for the trip described in the user_input as a string in the format '%Y-%m-%d' . Identify the explicit start date and the number of days of the trip to calculate or locate the exact end date based on the total trip length/number of days per destination, or returning dates mentioned. Focus on temporal keywords like days, weeks, months, specific dates associated with this travel plan.")
         self.query_embeds=self.create_embeddings(query)
         if self.query_embeds:
             try:
                 results = self.vectors.search(query=self.query_embeds).to_list()[:5]
                 context = " ".join([(r["text"]) for r in results])
-                full_context = f"Database Context: {context}\nUser Current Request: {user_prompt}"
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                full_context = (
+                    f"INSTRUCTION: Today's date is strictly {today_str}. "
+                    f"Calculate any relative terms like 'today', 'tomorrow', or 'next week' using this date anchor.\n\n"
+                    f"Historical Context:\n{context}\n\n"
+                    f"Current Request:\n{user_prompt}"
+                )
                 json_output = self.LLM_Chat(context=full_context)
                 self.start_date = json_output["start_date"][0]
                 self.end_date = json_output["end_date"][0]
