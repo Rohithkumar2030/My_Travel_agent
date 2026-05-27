@@ -1,6 +1,10 @@
 import lancedb
 import json
 import os
+import requests
+import requests_cache
+import openmeteo_requests
+from retry_requests import retry
 from google import genai
 from json_repair import repair_json
 from datetime import datetime
@@ -12,6 +16,10 @@ load_dotenv()
 base_path = Path(__file__).resolve().parent
 db_path = base_path / "vectordb"
 collection = lancedb.connect(str(db_path))
+
+cache_session = requests_cache.CachedSession('.cache', expire_after = 3600)
+retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
+openmeteo = openmeteo_requests.Client(session = retry_session)
 
 initial_data = [{
     "vector": [0.0] * 3072,
@@ -29,7 +37,7 @@ class TravelPlanner():
         self.start_date = None
         self.end_date = None
 
-    def LLM_Chat(self,model: str = "gemini-2.5-flash-lite", context=None):
+    def LLM_Chat(self,model: str = "gemini-2.5-flash", context=None):
         json_schema = {
             "type": "OBJECT",
             "properties": {
@@ -70,7 +78,7 @@ class TravelPlanner():
 
         try:
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash-lite",
+                model="gemini-2.5-flash",
                 contents = [context],
                 config=llm_config
             )
@@ -111,7 +119,6 @@ class TravelPlanner():
                 return None
 
     def fetch_dates(self,user_prompt):
-
         query = (f"Take this user_prompt: {user_prompt} and Extract the precise timeline, calendar dates, and duration for the trip described in the user_input as a string in the format '%Y-%m-%d' . Identify the explicit start date and the number of days of the trip to calculate or locate the exact end date based on the total trip length/number of days per destination, or returning dates mentioned. Focus on temporal keywords like days, weeks, months, specific dates associated with this travel plan.")
         self.query_embeds=self.create_embeddings(query)
         if self.query_embeds:
@@ -135,25 +142,34 @@ class TravelPlanner():
                 return None
 
     def fetch_weather(self,city,start_date,end_date):
-        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-        start_day = start_dt.strftime('%A')
-        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-        end_day = end_dt.strftime('%A')
-        base_url = f"https://serpapi.com/search.json"
-        weather_api_key = os.environ.get("WEATHER_API_KEY")
+        # start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        # start_day = start_dt.strftime('%A')
+        # end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        # end_day = end_dt.strftime('%A')
+        city = city.strip()
+        base_url_location =f"https://geocoding-api.open-meteo.com/v1/search?name={city}"
+        response = requests.get(base_url_location)
+        data = response.json()
+        latitude = data["results"][0]["latitude"]
+        longitude = data["results"][0]["longitude"]
         params = {
-            "q": f"whats the weather condition in {city} from {start_date} to {end_date}",
-            "location": "United States",
-            "hl": "en",
-            "gl": "us",
-            "google_domain": "google.com",
-            "api_key": weather_api_key  
+            "latitude": latitude,
+            "longitude": longitude,
+            "daily": ["weather_code", "temperature_2m_max", "temperature_2m_min", "precipitation_probability_max", "precipitation_hours"],
+            "timezone": "auto",
+            "start_date": start_date,
+            "end_date": end_date,
         }
-        response = requests.get(base_url,params=params)
-        if response.status_code == 200:
-            data = response.json().get("answer_box", {}).get("forecast", [])
-        print(data)
-        return data
+        base_url_weather = "https://api.open-meteo.com/v1/forecast"
+        responses = openmeteo.weather_api(base_url_weather, params = params)
+        response = responses[0]
+        daily = response.Daily()
+        daily_weather_code = daily.Variables(0).ValuesAsNumpy().tolist()
+        daily_temperature_2m_max = daily.Variables(1).ValuesAsNumpy().tolist()
+        daily_temperature_2m_min = daily.Variables(2).ValuesAsNumpy().tolist()
+        daily_precipitation_probability_max = daily.Variables(3).ValuesAsNumpy().tolist()
+        daily_precipitation_hours = daily.Variables(4).ValuesAsNumpy().tolist()
+        return [daily_weather_code,daily_temperature_2m_max,daily_temperature_2m_min,daily_precipitation_probability_max,daily_precipitation_hours]
 
     def create_embeddings(self, text, model="models/text-embedding-004"):
         text = text.replace("\n", " ")
@@ -172,8 +188,8 @@ def main():
     if destination and dates:
         print(f"Destination found: {destination}")
         print(f"Dates found: {dates}")
+        weather_data = planner.fetch_weather(destination,dates[0],dates[1])
+        print(weather_data)
 
 if __name__ == "__main__":
     main()
-
-

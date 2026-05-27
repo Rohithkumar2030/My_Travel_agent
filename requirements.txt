@@ -3,3 +3,6 @@ dotenv
 google-genai
 datetime
 lancedb
+openmeteo-requests
+requests-cache
+retry-requests
